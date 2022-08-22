@@ -9,7 +9,7 @@ import io.airbyte.commons.lang.Exceptions;
 import io.airbyte.commons.resources.MoreResources;
 import io.airbyte.config.ResourceRequirements;
 import io.airbyte.config.TolerationPOJO;
-import io.airbyte.metrics.lib.DogStatsDMetricSingleton;
+import io.airbyte.metrics.lib.MetricClientFactory;
 import io.airbyte.metrics.lib.OssMetricsRegistry;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
@@ -47,6 +47,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -94,6 +95,9 @@ import org.slf4j.MDC;
  * See the constructor for more information.
  */
 
+// Suppressing AvoidPrintStackTrace PMD warnings because
+// it is required for the connectors
+@SuppressWarnings("PMD.AvoidPrintStackTrace")
 // TODO(Davin): Better test for this. See https://github.com/airbytehq/airbyte/issues/3700.
 public class KubePodProcess extends Process implements KubePod {
 
@@ -189,7 +193,7 @@ public class KubePodProcess extends Process implements KubePod {
                                    final ResourceRequirements resourceRequirements,
                                    final Map<Integer, Integer> internalToExternalPorts,
                                    final Map<String, String> envMap,
-                                   final String[] args)
+                                   final String... args)
       throws IOException {
     final var argsStr = String.join(" ", args);
     final var optionalStdin = usesStdin ? String.format("< %s", STDIN_PIPE_FILE) : "";
@@ -269,7 +273,7 @@ public class KubePodProcess extends Process implements KubePod {
           // Copying the success indicator file to the init container causes the container to immediately
           // exit, causing the `kubectl cp` command to exit with code 137. This check ensures that an error is
           // not thrown in this case if the init container exits successfully.
-          if (file.getKey().equals(SUCCESS_FILE_NAME) && waitForInitPodToTerminate(client, podDefinition, 5, TimeUnit.MINUTES) == 0) {
+          if (SUCCESS_FILE_NAME.equals(file.getKey()) && waitForInitPodToTerminate(client, podDefinition, 5, TimeUnit.MINUTES) == 0) {
             LOGGER.info("Init was successful; ignoring non-zero kubectl cp exit code for success indicator file.");
           } else {
             throw new IOException("kubectl cp failed with exit code " + exitCode);
@@ -558,7 +562,8 @@ public class KubePodProcess extends Process implements KubePod {
       final boolean isReady = Objects.nonNull(p) && Readiness.getInstance().isReady(p);
       return isReady || KubePodResourceHelper.isTerminal(p);
     }, 20, TimeUnit.MINUTES);
-    DogStatsDMetricSingleton.recordTimeGlobal(OssMetricsRegistry.KUBE_POD_PROCESS_CREATE_TIME_MILLISECS, System.currentTimeMillis() - start);
+    MetricClientFactory.getMetricClient().distribution(OssMetricsRegistry.KUBE_POD_PROCESS_CREATE_TIME_MILLISECS,
+        System.currentTimeMillis() - start);
 
     // allow writing stdin to pod
     LOGGER.info("Reading pod IP...");
@@ -670,9 +675,27 @@ public class KubePodProcess extends Process implements KubePod {
     return new KubePodProcessInfo(podDefinition.getMetadata().getName());
   }
 
+  private Container getMainContainerFromPodDefinition() {
+    final Optional<Container> containerOptional = podDefinition.getSpec()
+        .getContainers()
+        .stream()
+        .filter(c -> c.getName().contentEquals(MAIN_CONTAINER_NAME))
+        .findFirst();
+    if (containerOptional.isEmpty()) {
+      LOGGER.warn(String.format("Could not find main container definition for pod: %s", podDefinition.getMetadata().getName()));
+      return null;
+    } else {
+      return containerOptional.get();
+    }
+  }
+
   @Override
   public KubePodInfo getInfo() {
-    return new KubePodInfo(podDefinition.getMetadata().getNamespace(), podDefinition.getMetadata().getName());
+    final Container mainContainer = getMainContainerFromPodDefinition();
+    final KubeContainerInfo mainContainerInfo = new KubeContainerInfo(mainContainer.getImage(), mainContainer.getImagePullPolicy());
+    return new KubePodInfo(podDefinition.getMetadata().getNamespace(),
+        podDefinition.getMetadata().getName(),
+        mainContainerInfo);
   }
 
   /**
@@ -721,7 +744,8 @@ public class KubePodProcess extends Process implements KubePod {
         throw new RuntimeException(
             prependPodInfo("Cannot find pod %s : %s while trying to retrieve exit code. This probably means the pod was not correctly created.",
                 podDefinition.getMetadata().getNamespace(),
-                podDefinition.getMetadata().getName()));
+                podDefinition.getMetadata().getName()),
+            e);
       }
     } else {
       throw new IllegalThreadStateException(prependPodInfo("Main container in kube pod has not terminated yet.",

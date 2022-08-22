@@ -18,15 +18,20 @@ from source_amazon_seller_partner.streams import (
     BrandAnalyticsMarketBasketReports,
     BrandAnalyticsRepeatPurchaseReports,
     BrandAnalyticsSearchTermsReports,
+    FbaCustomerReturnsReports,
     FbaInventoryReports,
     FbaOrdersReports,
     FbaReplacementsReports,
     FbaShipmentsReports,
+    FbaStorageFeesReports,
     FlatFileOpenListingsReports,
     FlatFileOrdersReports,
     FlatFileOrdersReportsByLastUpdate,
+    FlatFileSettlementV2Reports,
     FulfilledShipmentsReports,
     GetXmlBrowseTreeData,
+    ListFinancialEventGroups,
+    ListFinancialEvents,
     MerchantListingsReports,
     Orders,
     SellerFeedbackReports,
@@ -115,13 +120,16 @@ class SourceAmazonSellerPartner(AbstractSource):
         stream_kwargs = self._get_stream_kwargs(config)
 
         return [
+            FbaCustomerReturnsReports(**stream_kwargs),
             FbaInventoryReports(**stream_kwargs),
             FbaOrdersReports(**stream_kwargs),
             FbaShipmentsReports(**stream_kwargs),
             FbaReplacementsReports(**stream_kwargs),
+            FbaStorageFeesReports(**stream_kwargs),
             FlatFileOpenListingsReports(**stream_kwargs),
             FlatFileOrdersReports(**stream_kwargs),
             FlatFileOrdersReportsByLastUpdate(**stream_kwargs),
+            FlatFileSettlementV2Reports(**stream_kwargs),
             FulfilledShipmentsReports(**stream_kwargs),
             MerchantListingsReports(**stream_kwargs),
             VendorDirectFulfillmentShipping(**stream_kwargs),
@@ -134,6 +142,8 @@ class SourceAmazonSellerPartner(AbstractSource):
             BrandAnalyticsAlternatePurchaseReports(**stream_kwargs),
             BrandAnalyticsItemComparisonReports(**stream_kwargs),
             GetXmlBrowseTreeData(**stream_kwargs),
+            ListFinancialEventGroups(**stream_kwargs),
+            ListFinancialEvents(**stream_kwargs),
         ]
 
     def spec(self, *args, **kwargs) -> ConnectorSpecification:

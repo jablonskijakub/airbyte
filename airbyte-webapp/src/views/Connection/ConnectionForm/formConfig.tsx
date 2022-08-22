@@ -4,7 +4,7 @@ import * as yup from "yup";
 
 import { DropDownRow } from "components";
 
-import FrequencyConfig from "config/FrequencyConfig.json";
+import { frequencyConfig } from "config/frequencyConfig";
 import { SyncSchema } from "core/domain/catalog";
 import {
   isDbtTransformation,
@@ -28,7 +28,7 @@ import { useCurrentWorkspace } from "services/workspaces/WorkspacesService";
 
 import calculateInitialCatalog from "./calculateInitialCatalog";
 
-type FormikConnectionFormValues = {
+interface FormikConnectionFormValues {
   name?: string;
   schedule?: ConnectionSchedule | null;
   prefix: string;
@@ -37,11 +37,11 @@ type FormikConnectionFormValues = {
   namespaceFormat: string;
   transformations?: OperationRead[];
   normalization?: NormalizationType;
-};
+}
 
 type ConnectionFormValues = ValuesProps;
 
-const SUPPORTED_MODES: [SyncMode, DestinationSyncMode][] = [
+const SUPPORTED_MODES: Array<[SyncMode, DestinationSyncMode]> = [
   [SyncMode.incremental, DestinationSyncMode.append_dedup],
   [SyncMode.full_refresh, DestinationSyncMode.overwrite],
   [SyncMode.incremental, DestinationSyncMode.append],
@@ -62,7 +62,7 @@ function useDefaultTransformation(): OperationCreate {
       operatorType: OperatorType.dbt,
       dbt: {
         gitRepoUrl: "", // TODO: Does this need a value?
-        dockerImage: "fishtownanalytics/dbt:0.19.1",
+        dockerImage: "fishtownanalytics/dbt:1.0.0",
         dbtArguments: "run",
       },
     },
@@ -114,7 +114,7 @@ const connectionValidationSchema = yup
               name: "connectionSchema.config.validator",
               // eslint-disable-next-line no-template-curly-in-string
               message: "${path} is wrong",
-              test: function (value) {
+              test(value) {
                 if (!value.selected) {
                   return true;
                 }
@@ -204,7 +204,7 @@ const getInitialTransformations = (operations: OperationCreate[]): OperationRead
   operations?.filter(isDbtTransformation) ?? [];
 
 const getInitialNormalization = (
-  operations?: (OperationRead | OperationCreate)[],
+  operations?: Array<OperationRead | OperationCreate>,
   isEditMode?: boolean
 ): NormalizationType => {
   const initialNormalization =
@@ -234,7 +234,7 @@ const useInitialValues = (
     const initialValues: FormikConnectionFormValues = {
       name: connection.name ?? `${connection.source.name} <> ${connection.destination.name}`,
       syncCatalog: initialSchema,
-      schedule: connection.schedule !== undefined ? connection.schedule : DEFAULT_SCHEDULE,
+      schedule: connection.connectionId ? connection.schedule ?? null : DEFAULT_SCHEDULE,
       prefix: connection.prefix || "",
       namespaceDefinition: connection.namespaceDefinition || NamespaceDefinitionType.source,
       namespaceFormat: connection.namespaceFormat ?? SOURCE_NAMESPACE_TAG,
@@ -254,27 +254,35 @@ const useInitialValues = (
   }, [initialSchema, connection, isEditMode, destDefinition]);
 };
 
-const useFrequencyDropdownData = (): DropDownRow.IDataItem[] => {
+const useFrequencyDropdownData = (
+  additionalFrequency: WebBackendConnectionRead["schedule"]
+): DropDownRow.IDataItem[] => {
   const { formatMessage } = useIntl();
 
-  return useMemo(
-    () =>
-      FrequencyConfig.map((item) => ({
-        value: item.config,
-        label:
-          item.config === null
-            ? item.text
-            : formatMessage(
-                {
-                  id: "form.every",
-                },
-                {
-                  value: item.simpleText || item.text,
-                }
-              ),
-      })),
-    [formatMessage]
-  );
+  return useMemo(() => {
+    const frequencies = [...frequencyConfig];
+    if (additionalFrequency) {
+      const additionalFreqAlreadyPresent = frequencies.some(
+        (frequency) =>
+          frequency?.timeUnit === additionalFrequency.timeUnit && frequency?.units === additionalFrequency.units
+      );
+      if (!additionalFreqAlreadyPresent) {
+        frequencies.push(additionalFrequency);
+      }
+    }
+
+    return frequencies.map((frequency) => ({
+      value: frequency,
+      label: frequency
+        ? formatMessage(
+            {
+              id: `form.every.${frequency.timeUnit}`,
+            },
+            { value: frequency.units }
+          )
+        : formatMessage({ id: "frequency.manual" }),
+    }));
+  }, [formatMessage, additionalFrequency]);
 };
 
 export type { ConnectionFormValues, FormikConnectionFormValues };
